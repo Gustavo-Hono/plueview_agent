@@ -36,6 +36,15 @@ Como o ESP32 envia dados meteorologicos a cada 1 hora, a recomendacao e:
 
 Isso detecta falha depois de aproximadamente 2 envios perdidos, mas evita perder tempo por desalinhamento do cron. Se voce rodar literalmente a cada 2 horas, uma falha logo depois do cron pode demorar perto de 4 horas para aparecer.
 
+## Organizacao do codigo
+
+- `hermes_core.py`: SQL, integracao com Supabase MCP, parsing do resultado e regras de diagnostico.
+- `hermes_mcp.py`: servidor/adaptador MCP para o Hermes.
+- `monitor_cron.py`: script chamado pelo cron para monitorar sem interacao humana.
+- `test_hermes_client.py`: smoke test local sem depender do Supabase.
+
+Para manutencao, altere limiares e regras de diagnostico no `hermes_core.py`. O `hermes_mcp.py` deve continuar simples, apenas expondo as ferramentas MCP.
+
 ## 1. Entrar na VM
 
 Pelo seu computador local:
@@ -129,11 +138,17 @@ EOF
 chmod 600 /opt/plueview_agent/.env
 ```
 
+Use `SUPABASE_PROJECT_REF` para o ref puro do projeto. Se preferir informar a URL completa, use:
+
+```bash
+SUPABASE_MCP_URL=https://mcp.supabase.com/mcp?project_ref=wlwaysvyyvrvfdngnaej&read_only=true&features=database
+```
+
 ## 6. Testar sintaxe
 
 ```bash
 cd /opt/plueview_agent
-venv/bin/python -m py_compile hermes_mcp.py test_hermes_client.py
+venv/bin/python -m py_compile hermes_core.py hermes_mcp.py monitor_cron.py test_hermes_client.py
 ```
 
 ## 7. Testar logica local sem Supabase

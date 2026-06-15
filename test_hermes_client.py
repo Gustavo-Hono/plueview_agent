@@ -1,6 +1,6 @@
 import json
 
-from hermes_mcp import _build_sql, _extract_payload, _diagnose_payload
+from hermes_core import build_station_diagnostic_sql, diagnose_payload, extract_payload
 
 
 SAMPLE_SUPABASE_RESULT = [
@@ -61,11 +61,11 @@ SAMPLE_SUPABASE_RESULT = [
 
 def main() -> None:
     print("SQL:")
-    print(_build_sql(1, 24, 1000))
+    print(build_station_diagnostic_sql(1, 24, 1000))
 
-    payload = _extract_payload(json.dumps(SAMPLE_SUPABASE_RESULT))
+    payload = extract_payload(json.dumps(SAMPLE_SUPABASE_RESULT))
     print("\nDiagnostico:")
-    print(_diagnose_payload(payload, station_id=1, horas=24))
+    print(diagnose_payload(payload, station_id=1, hours=24))
 
 
 if __name__ == "__main__":

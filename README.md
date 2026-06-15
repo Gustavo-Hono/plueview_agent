@@ -12,7 +12,9 @@ Use este README para entender a arquitetura e implementar o MCP no cliente Herme
 
 ## O que foi criado
 
-- `hermes_mcp.py`: servidor MCP local de diagnostico.
+- `hermes_core.py`: regras de negocio, SQL, cliente Supabase MCP e diagnostico.
+- `hermes_mcp.py`: adaptador MCP local; deve ficar fino e delegar a regra para o core.
+- `monitor_cron.py`: entrada para monitoramento automatico via cron.
 - `mcp.example.json`: exemplo de configuracao para adicionar no Hermes.
 - `test_hermes_client.py`: teste local sem acessar Supabase.
 
@@ -83,7 +85,8 @@ Entao, para rodar o Hermes MCP local, nao precisa instalar nada agora.
 
 Para acessar Supabase pelo MCP oficial, voce precisa de:
 
-- `SUPABASE_PROJECT_REF`: id/ref do projeto Supabase.
+- `SUPABASE_PROJECT_REF`: id/ref do projeto Supabase, por exemplo `wlwaysvyyvrvfdngnaej`.
+- `SUPABASE_MCP_URL`: opcional, use se quiser informar a URL completa do MCP Supabase.
 
 `SUPABASE_ACCESS_TOKEN` nao e obrigatorio no fluxo normal. O Supabase MCP remoto usa login/OAuth pelo cliente MCP quando o cliente suporta esse fluxo. Use token manual apenas quando:
 
@@ -103,6 +106,8 @@ Use sempre:
 read_only=true
 features=database
 ```
+
+Prefira guardar apenas o ref puro em `SUPABASE_PROJECT_REF`. Se voce ja colocou a URL completa em `SUPABASE_PROJECT_REF`, o core ainda aceita, mas para manutencao o nome mais claro e `SUPABASE_MCP_URL`.
 
 ## Implementacao no Hermes
 
@@ -251,7 +256,7 @@ O modo recomendado ainda e o fluxo com duas ferramentas, porque deixa o acesso a
 Teste de sintaxe:
 
 ```bash
-agent/venv/bin/python -m py_compile agent/hermes_mcp.py agent/test_hermes_client.py
+agent/venv/bin/python -m py_compile agent/hermes_core.py agent/hermes_mcp.py agent/monitor_cron.py agent/test_hermes_client.py
 ```
 
 Teste local sem Supabase:

@@ -4,13 +4,13 @@ import argparse
 import asyncio
 from datetime import datetime, timezone
 
-from hermes_mcp import (
-    _build_sql,
-    _diagnose_payload,
-    _execute_supabase_sql,
-    _extract_payload,
-    _latest_age,
-    _rows,
+from hermes_core import (
+    build_station_diagnostic_sql,
+    diagnose_payload,
+    execute_supabase_sql,
+    extract_payload,
+    latest_age_hours,
+    payload_rows,
 )
 
 
@@ -26,15 +26,15 @@ def parse_args() -> argparse.Namespace:
 
 async def main() -> int:
     args = parse_args()
-    sql = _build_sql(args.station_id, args.window_hours, args.limit)
-    result = await _execute_supabase_sql(sql)
-    payload = _extract_payload(result)
+    sql = build_station_diagnostic_sql(args.station_id, args.window_hours, args.limit)
+    result = await execute_supabase_sql(sql)
+    payload = extract_payload(result)
 
-    weather = _rows(payload, "weather")
-    iot = _rows(payload, "iot")
-    weather_age = _latest_age(weather)
-    iot_age = _latest_age(iot)
-    diagnosis = _diagnose_payload(payload, station_id=args.station_id, horas=args.window_hours)
+    weather = payload_rows(payload, "weather")
+    iot = payload_rows(payload, "iot")
+    weather_age = latest_age_hours(weather)
+    iot_age = latest_age_hours(iot)
+    diagnosis = diagnose_payload(payload, station_id=args.station_id, hours=args.window_hours)
 
     alerts: list[str] = []
     if not weather:
