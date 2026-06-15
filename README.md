@@ -37,7 +37,7 @@ O Hermes MCP deve ficar responsavel pela regra de negocio:
 - quais tabelas ler;
 - qual SQL usar;
 - como detectar falha de sensor;
-- como detectar queda de bateria;
+- como detectar queda de bateria quando houver telemetria disponivel;
 - como detectar evento climatico estranho;
 - como formatar um diagnostico curto.
 
@@ -45,9 +45,14 @@ Assim o Hermes nao precisa guardar credencial direta do Postgres nem instalar dr
 
 ## Tabelas usadas
 
-O diagnostico usa as tabelas do schema Prisma atual:
+O diagnostico usa `stationId` como filtro principal.
+
+Tabela obrigatoria:
 
 - `public.weather_data`
+
+Tabela opcional, usada apenas se houver telemetria IoT/bateria:
+
 - `public."DataPlueView"`
 
 Campos meteorologicos:
@@ -62,7 +67,7 @@ Campos meteorologicos:
 - `weather_data.latitude`
 - `weather_data.longitude`
 
-Campos IoT/brutos:
+Campos IoT/brutos opcionais:
 
 - `"DataPlueView"."stationId"`
 - `"DataPlueView".time`
@@ -206,8 +211,8 @@ Prompt recomendado:
 
 ```text
 Analise a estacao 1 nas ultimas 24 horas.
-Use o Supabase MCP em modo read-only para ler weather_data e DataPlueView.
-Veja se houve falha de sensor, queda de bateria ou evento climatico estranho.
+Use o Supabase MCP em modo read-only para ler weather_data pelo stationId.
+Veja se houve falha de sensor ou evento climatico estranho. Se houver telemetria de bateria, avalie tambem queda de bateria.
 Gere um diagnostico curto.
 ```
 
@@ -306,8 +311,7 @@ O SQL e somente leitura. Ele:
 
 - filtra `weather_data."stationId"`;
 - filtra `weather_data."dataMedicao"` pela janela em horas;
-- filtra `"DataPlueView"."stationId"`;
-- filtra `"DataPlueView".time` pela janela em horas;
+- tenta incluir dados opcionais de `"DataPlueView"` pelo mesmo `stationId`;
 - devolve um unico campo `hermes_payload` em JSON.
 
 Exemplo resumido:
@@ -328,17 +332,17 @@ O Hermes gera um diagnostico curto com estes blocos:
 
 - `Base`: quantidade de leituras meteorologicas e IoT.
 - `Sensor`: lacunas, campos ausentes, valores fisicamente invalidos e consumo de sensor zerado/negativo.
-- `Bateria`: bateria ausente, baixa, critica, queda acumulada e queda brusca entre leituras.
+- `Bateria`: `nao avaliada` quando nao houver telemetria; se houver bateria, avalia baixa, critica, queda acumulada e queda brusca entre leituras.
 - `Clima`: temperatura extrema, umidade extrema, pico de chuva, chuva acumulada alta, vento forte e saltos bruscos.
 - `Conclusao`: `operacao normal`, `monitorar` ou `requer verificacao operacional`.
 
 Limiares atuais:
 
 - lacuna meteorologica: `>= 3h`;
-- bateria baixa: `< 35%`;
-- bateria critica: `< 20%`;
-- queda acumulada de bateria: `>= 15 pontos percentuais`;
-- queda brusca de bateria: `>= 10 pontos entre leituras`;
+- bateria baixa, se houver telemetria: `< 35%`;
+- bateria critica, se houver telemetria: `< 20%`;
+- queda acumulada de bateria, se houver telemetria: `>= 15 pontos percentuais`;
+- queda brusca de bateria, se houver telemetria: `>= 10 pontos entre leituras`;
 - temperatura fisicamente suspeita: `< -20 C` ou `> 60 C`;
 - temperatura extrema de evento climatico: `<= -5 C` ou `>= 45 C`;
 - umidade valida: `0%` a `100%`;

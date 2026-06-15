@@ -337,8 +337,8 @@ Nesse caso, o `.env` precisa ter `SUPABASE_ACCESS_TOKEN`.
 
 ```text
 Analise a estacao 1 nas ultimas 24 horas.
-Use o Supabase MCP em modo read-only para ler weather_data e DataPlueView.
-Veja se houve falha de sensor, queda de bateria ou evento climatico estranho.
+Use o Supabase MCP em modo read-only para ler weather_data pelo stationId.
+Veja se houve falha de sensor ou evento climatico estranho. Se houver telemetria de bateria, avalie tambem queda de bateria.
 Gere um diagnostico curto.
 ```
 

@@ -406,7 +406,7 @@ def detect_sensor_issues(weather: list[dict[str, Any]], iot: list[dict[str, Any]
 def detect_battery_issues(iot: list[dict[str, Any]]) -> list[str]:
     battery_rows = [row for row in sort_by_time(iot) if numeric_value(row, "battery") is not None]
     if not battery_rows:
-        return ["sem telemetria de bateria no periodo"]
+        return ["nao avaliada (sem telemetria de bateria)"]
 
     values = [numeric_value(row, "battery") for row in battery_rows]
     values = [value for value in values if value is not None]
@@ -532,7 +532,6 @@ def diagnose_payload(payload: dict[str, Any], station_id: int | None = None, hou
     severe = any(
         "critica" in issue
         or "sem leituras" in issue
-        or "sem telemetria" in issue
         or "fora" in issue
         or "lacuna" in issue
         or "queda brusca" in issue
