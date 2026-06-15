@@ -5,15 +5,19 @@ import os
 import re
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from fastmcp import Client, FastMCP
 from fastmcp.client.transports import StreamableHttpTransport
+from dotenv import load_dotenv
 
 
 DEFAULT_SUPABASE_MCP_URL = "https://mcp.supabase.com/mcp"
 DEFAULT_LIMIT = 1000
+
+load_dotenv(Path(__file__).with_name(".env"))
 
 mcp = FastMCP("Hermes Supabase Diagnostics")
 

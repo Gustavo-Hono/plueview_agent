@@ -84,7 +84,12 @@ Entao, para rodar o Hermes MCP local, nao precisa instalar nada agora.
 Para acessar Supabase pelo MCP oficial, voce precisa de:
 
 - `SUPABASE_PROJECT_REF`: id/ref do projeto Supabase.
-- `SUPABASE_ACCESS_TOKEN`: token de acesso, caso o cliente Hermes nao consiga fazer OAuth pelo Supabase MCP.
+
+`SUPABASE_ACCESS_TOKEN` nao e obrigatorio no fluxo normal. O Supabase MCP remoto usa login/OAuth pelo cliente MCP quando o cliente suporta esse fluxo. Use token manual apenas quando:
+
+- o cliente MCP nao suporta login/OAuth;
+- voce estiver em CI ou ambiente sem navegador;
+- voce quiser passar autenticacao por header manualmente.
 
 O Supabase MCP remoto oficial e:
 
@@ -120,10 +125,7 @@ Exemplo com caminhos relativos ao diretorio raiz deste workspace:
   "mcpServers": {
     "supabase": {
       "type": "http",
-      "url": "https://mcp.supabase.com/mcp?project_ref=${SUPABASE_PROJECT_REF}&read_only=true&features=database",
-      "headers": {
-        "Authorization": "Bearer ${SUPABASE_ACCESS_TOKEN}"
-      }
+      "url": "https://mcp.supabase.com/mcp?project_ref=${SUPABASE_PROJECT_REF}&read_only=true&features=database"
     },
     "hermes": {
       "command": "agent/venv/bin/python",
@@ -146,10 +148,7 @@ Se o Hermes roda a partir de outro diretorio, prefira caminho absoluto:
   "mcpServers": {
     "supabase": {
       "type": "http",
-      "url": "https://mcp.supabase.com/mcp?project_ref=${SUPABASE_PROJECT_REF}&read_only=true&features=database",
-      "headers": {
-        "Authorization": "Bearer ${SUPABASE_ACCESS_TOKEN}"
-      }
+      "url": "https://mcp.supabase.com/mcp?project_ref=${SUPABASE_PROJECT_REF}&read_only=true&features=database"
     },
     "hermes": {
       "command": "/home/pinguimsurfante/Área de trabalho/plueview/agent/venv/bin/python",
@@ -163,7 +162,22 @@ Se o Hermes nao aceitar variaveis `${...}` dentro do JSON, substitua pelos valor
 
 ```text
 ${SUPABASE_PROJECT_REF} -> ref do projeto Supabase
-${SUPABASE_ACCESS_TOKEN} -> token do Supabase
+```
+
+Se o Hermes nao suportar OAuth/login do Supabase MCP e exigir autenticacao manual, use a variante com header:
+
+```json
+{
+  "mcpServers": {
+    "supabase": {
+      "type": "http",
+      "url": "https://mcp.supabase.com/mcp?project_ref=${SUPABASE_PROJECT_REF}&read_only=true&features=database",
+      "headers": {
+        "Authorization": "Bearer ${SUPABASE_ACCESS_TOKEN}"
+      }
+    }
+  }
+}
 ```
 
 ### 3. Reinicie ou recarregue as ferramentas MCP
@@ -221,8 +235,13 @@ Para isso, deixe estas variaveis disponiveis no ambiente que inicia o Hermes MCP
 
 ```bash
 export SUPABASE_PROJECT_REF="seu-project-ref"
-export SUPABASE_ACCESS_TOKEN="seu-token"
 export SUPABASE_MCP_URL="https://mcp.supabase.com/mcp?project_ref=${SUPABASE_PROJECT_REF}&read_only=true&features=database"
+```
+
+Se estiver usando autenticacao manual por PAT, adicione tambem:
+
+```bash
+export SUPABASE_ACCESS_TOKEN="seu-token"
 ```
 
 O modo recomendado ainda e o fluxo com duas ferramentas, porque deixa o acesso ao banco explicitamente no Supabase MCP.
@@ -349,7 +368,8 @@ project_ref=<seu-project-ref>
 Evite conectar o Hermes com permissao ampla em producao. Se precisar usar dados reais, prefira:
 
 - projeto escopado por `project_ref`;
-- token com menor permissao possivel;
+- login/OAuth pelo Supabase MCP, quando suportado pelo cliente;
+- token com menor permissao possivel, apenas quando autenticacao manual for necessaria;
 - aprovacao manual das chamadas MCP no Hermes;
 - revisao do SQL antes de executar.
 
@@ -371,8 +391,8 @@ Verifique:
 
 - se a URL contem `read_only=true`;
 - se `SUPABASE_PROJECT_REF` foi preenchido;
-- se o cliente Hermes aceita headers;
-- se `SUPABASE_ACCESS_TOKEN` esta valido.
+- se o cliente Hermes iniciou o fluxo de login/OAuth do Supabase MCP;
+- se, no modo manual com header, o cliente Hermes aceita headers e `SUPABASE_ACCESS_TOKEN` esta valido.
 
 ### `execute_sql` nao aparece
 
