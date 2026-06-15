@@ -19,6 +19,23 @@ Recomendado:
 
 Use `/root/plueview_agent` somente se o Hermes tambem for rodar como root. Se o Hermes rodar como outro usuario, ele pode nao conseguir ler arquivos dentro de `/root`.
 
+O Hermes em si nao precisa ser instalado na raiz da VM. O que precisa ficar em um caminho estavel e o agent MCP, por isso este guia usa `/opt/plueview_agent`.
+
+## Como o monitoramento funciona
+
+Existem dois modos:
+
+- Por demanda: o usuario pergunta no Hermes, e o Hermes chama o MCP local.
+- Automatico: o cron da VM roda `monitor_cron.py` periodicamente e grava diagnosticos em log.
+
+Como o ESP32 envia dados meteorologicos a cada 1 hora, a recomendacao e:
+
+- rodar o cron a cada 1 hora;
+- considerar alerta quando a ultima leitura tiver mais de `2.5h`;
+- analisar uma janela de `6h`.
+
+Isso detecta falha depois de aproximadamente 2 envios perdidos, mas evita perder tempo por desalinhamento do cron. Se voce rodar literalmente a cada 2 horas, uma falha logo depois do cron pode demorar perto de 4 horas para aparecer.
+
 ## 1. Entrar na VM
 
 Pelo seu computador local:
@@ -194,7 +211,70 @@ PY
 
 Se voce nao colocou `SUPABASE_ACCESS_TOKEN`, pule este teste e teste pelo cliente Hermes usando Supabase MCP separado.
 
-## 10. Configurar no cliente Hermes
+## 10. Testar monitor automatico local
+
+Este teste simula o que o cron vai executar. Ele precisa de `SUPABASE_ACCESS_TOKEN` no `.env`, porque cron nao consegue fazer login/OAuth interativo.
+
+```bash
+cd /opt/plueview_agent
+venv/bin/python monitor_cron.py --station-id 1 --window-hours 6 --stale-hours 2.5
+```
+
+Saida esperada quando estiver tudo normal:
+
+```text
+[2026-..] station=1 status=OK
+Diagnostico curto - estacao 1 (ultimas 6h)
+...
+```
+
+Se houver atraso, falta de dados ou diagnostico suspeito, a saida tera `status=ALERT` e o processo sai com codigo `2`.
+
+## 11. Configurar cron automatico
+
+Crie um diretorio de logs:
+
+```bash
+mkdir -p /opt/plueview_agent/logs
+```
+
+Abra o crontab do usuario atual:
+
+```bash
+crontab -e
+```
+
+Adicione esta linha para rodar a cada 1 hora:
+
+```cron
+0 * * * * cd /opt/plueview_agent && /opt/plueview_agent/venv/bin/python /opt/plueview_agent/monitor_cron.py --station-id 1 --window-hours 6 --stale-hours 2.5 >> /opt/plueview_agent/logs/monitor.log 2>&1
+```
+
+Essa configuracao e a recomendada para ESP32 enviando a cada 1 hora. O cron verifica de hora em hora, mas so alerta quando a ultima leitura estiver atrasada mais de `2.5h`.
+
+Se voce quiser rodar literalmente a cada 2 envios do ESP32, use:
+
+```cron
+0 */2 * * * cd /opt/plueview_agent && /opt/plueview_agent/venv/bin/python /opt/plueview_agent/monitor_cron.py --station-id 1 --window-hours 6 --stale-hours 2.5 >> /opt/plueview_agent/logs/monitor.log 2>&1
+```
+
+Eu prefiro a versao de 1 em 1 hora com `--stale-hours 2.5`, porque detecta mais cedo quando o cron e o envio do ESP32 nao estao perfeitamente alinhados.
+
+Ver logs:
+
+```bash
+tail -n 80 /opt/plueview_agent/logs/monitor.log
+```
+
+Ver se o cron foi instalado:
+
+```bash
+crontab -l
+```
+
+Importante: essa versao grava diagnosticos em log. Para enviar alerta por Telegram, email, Discord ou Slack, adicione um notifier depois; o cron ja separa `OK` de `ALERT`.
+
+## 12. Configurar no cliente Hermes
 
 No Hermes, adicione estes MCP servers.
 
@@ -238,7 +318,7 @@ Se o Hermes nao suportar OAuth/login do Supabase MCP, use header manual:
 Alternativa: usar apenas o MCP local `hermes` e chamar `analisar_estacao_supabase`.
 Nesse caso, o `.env` precisa ter `SUPABASE_ACCESS_TOKEN`.
 
-## 11. Prompt de teste no Hermes
+## 13. Prompt de teste no Hermes
 
 ```text
 Analise a estacao 1 nas ultimas 24 horas.
@@ -247,7 +327,7 @@ Veja se houve falha de sensor, queda de bateria ou evento climatico estranho.
 Gere um diagnostico curto.
 ```
 
-## 12. Atualizar na VM
+## 14. Atualizar na VM
 
 ```bash
 cd /opt/plueview_agent
