@@ -532,6 +532,7 @@ def diagnose_payload(payload: dict[str, Any], station_id: int | None = None, hou
     severe = any(
         "critica" in issue
         or "sem leituras" in issue
+        or "sem telemetria" in issue
         or "fora" in issue
         or "lacuna" in issue
         or "queda brusca" in issue
