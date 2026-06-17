@@ -54,6 +54,9 @@ def load_hermes_keys() -> dict[str, str]:
 
 
 async def call_llm_for_diagnosis(prompt: str, keys: dict[str, str]) -> str:
+    detected_keys = [k for k in keys.keys() if "KEY" in k or "TOKEN" in k]
+    print(f"Chaves de API detectadas no ambiente: {detected_keys}")
+    
     # 1. Se tiver NVIDIA_API_KEY
     if "NVIDIA_API_KEY" in keys:
         key = keys["NVIDIA_API_KEY"]
@@ -68,11 +71,18 @@ async def call_llm_for_diagnosis(prompt: str, keys: dict[str, str]) -> str:
             "temperature": 0.2,
             "max_tokens": 500
         }
+        print("Enviando requisição para Nvidia API...")
         try:
             async with httpx.AsyncClient() as client:
                 res = await client.post(url, json=body, headers=headers, timeout=25)
+                print(f"Resposta Nvidia: HTTP {res.status_code}")
                 if res.status_code == 200:
-                    return str(res.json()["choices"][0]["message"]["content"]).strip()
+                    data = res.json()
+                    content = data.get("choices", [{}])[0].get("message", {}).get("content")
+                    if content is None:
+                        print(f"Aviso: Resposta vazia da Nvidia API. JSON retornado: {data}")
+                        return ""
+                    return str(content).strip()
                 else:
                     print(f"Erro Nvidia API ({res.status_code}): {res.text}")
         except Exception as e:
@@ -86,15 +96,32 @@ async def call_llm_for_diagnosis(prompt: str, keys: dict[str, str]) -> str:
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"temperature": 0.2}
         }
+        print("Enviando requisição para Gemini API...")
         try:
             async with httpx.AsyncClient() as client:
                 res = await client.post(url, json=body, timeout=25)
+                print(f"Resposta Gemini: HTTP {res.status_code}")
                 if res.status_code == 200:
-                    return str(res.json()["candidates"][0]["content"]["parts"][0]["text"]).strip()
+                    data = res.json()
+                    candidates = data.get("candidates", [])
+                    if not candidates:
+                        print(f"Aviso: Nenhum candidato de resposta retornado pelo Gemini (pode ter sido bloqueado por segurança). JSON: {data}")
+                        return ""
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    if not parts:
+                        print(f"Aviso: Resposta sem partes de texto. finishReason: {candidates[0].get('finishReason')}. JSON: {data}")
+                        return ""
+                    content = parts[0].get("text")
+                    if content is None:
+                        return ""
+                    return str(content).strip()
                 else:
                     print(f"Erro Gemini API ({res.status_code}): {res.text}")
         except Exception as e:
             print(f"Erro ao chamar Gemini: {e}")
+
+    if not keys:
+        print("Aviso: Nenhuma chave de API de IA (NVIDIA_API_KEY ou GEMINI_API_KEY) foi encontrada nos arquivos .env.")
 
     return ""
 
