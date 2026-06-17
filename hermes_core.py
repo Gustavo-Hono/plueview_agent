@@ -358,17 +358,27 @@ def detect_sensor_issues(weather: list[dict[str, Any]], iot: list[dict[str, Any]
     else:
         gap = max_gap_hours(weather)
         if gap >= 3:
-            issues.append(f"lacuna de {format_hours(gap)} entre leituras meteorologicas")
+            issues.append(f"lacuna de {format_hours(gap)} entre leituras meteorologicas (Possível mau contato ou perda de sinal)")
 
-        missing_required = sum(
-            1
-            for row in weather
-            if numeric_value(row, "temperatura") is None
-            or numeric_value(row, "umidade") is None
-            or numeric_value(row, "quantidadeChuva") is None
-        )
-        if missing_required:
-            issues.append(f"{missing_required} leituras com campo meteorologico obrigatorio ausente")
+        total = len(weather)
+        missing_temp = sum(1 for r in weather if numeric_value(r, "temperatura") is None)
+        missing_hum = sum(1 for r in weather if numeric_value(r, "umidade") is None)
+        missing_rain = sum(1 for r in weather if numeric_value(r, "quantidadeChuva") is None)
+
+        if missing_temp == total and total > 0:
+            issues.append("sensor de temperatura sem dados (Possível defeito ou desconectado)")
+        elif 0 < missing_temp < total:
+            issues.append(f"temperatura ausente em {missing_temp}/{total} leituras (Possível mau contato)")
+
+        if missing_hum == total and total > 0:
+            issues.append("sensor de umidade sem dados (Possível defeito ou desconectado)")
+        elif 0 < missing_hum < total:
+            issues.append(f"umidade ausente em {missing_hum}/{total} leituras (Possível mau contato)")
+
+        if missing_rain == total and total > 0:
+            issues.append("pluviometro sem dados (Possível defeito ou desconectado)")
+        elif 0 < missing_rain < total:
+            issues.append(f"chuva ausente em {missing_rain}/{total} leituras (Possível mau contato)")
 
         invalid_temp = [
             row
@@ -386,19 +396,25 @@ def detect_sensor_issues(weather: list[dict[str, Any]], iot: list[dict[str, Any]
             if (rain := numeric_value(row, "quantidadeChuva")) is not None and rain < 0
         ]
         if invalid_temp:
-            issues.append(f"{len(invalid_temp)} temperaturas fora da faixa fisica esperada")
+            issues.append(f"{len(invalid_temp)} leituras com temperatura fora da faixa (Possível defeito no sensor)")
         if invalid_humidity:
-            issues.append(f"{len(invalid_humidity)} umidades fora de 0-100%")
+            issues.append(f"{len(invalid_humidity)} leituras com umidade fora de 0-100% (Possível defeito no sensor)")
         if invalid_rain:
-            issues.append(f"{len(invalid_rain)} leituras de chuva negativas")
+            issues.append(f"{len(invalid_rain)} leituras de chuva negativas (Possível defeito no sensor)")
 
     for field, label in SENSOR_FIELDS.items():
         present = [row for row in iot if row.get(field) is not None]
         if not present:
             continue
         zero_or_negative = [row for row in present if (numeric_value(row, field) or 0) <= 0]
-        if len(zero_or_negative) >= max(2, len(present) // 3):
-            issues.append(f"consumo zerado/negativo recorrente no sensor de {label}")
+        if zero_or_negative:
+            total_pres = len(present)
+            total_zero = len(zero_or_negative)
+            if total_zero >= max(2, total_pres // 3):
+                if total_zero == total_pres:
+                    issues.append(f"consumo zerado permanente no sensor de {label} (Possível defeito ou desconectado)")
+                else:
+                    issues.append(f"consumo zerado intermitente em {total_zero}/{total_pres} leituras no sensor de {label} (Possível mau contato)")
 
     return issues
 

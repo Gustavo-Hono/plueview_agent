@@ -7,6 +7,9 @@ import os
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+import httpx
 
 from hermes_core import (
     build_station_diagnostic_sql,
@@ -15,6 +18,7 @@ from hermes_core import (
     extract_payload,
     latest_age_hours,
     payload_rows,
+    sort_by_time,
 )
 
 
@@ -26,6 +30,73 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--stale-hours", type=float, default=2.5)
     parser.add_argument("--require-iot", action="store_true")
     return parser.parse_args()
+
+
+def load_hermes_keys() -> dict[str, str]:
+    keys = {}
+    # Procura no .env local e no global do Hermes
+    paths = [
+        Path(__file__).parent / ".env",
+        Path.home() / ".hermes" / ".env"
+    ]
+    for path in paths:
+        if path.exists():
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#") and "=" in line:
+                            k, v = line.split("=", 1)
+                            keys[k.strip()] = v.strip().strip('"').strip("'")
+            except Exception as e:
+                print(f"Erro ao ler chaves de {path}: {e}")
+    return keys
+
+
+async def call_llm_for_diagnosis(prompt: str, keys: dict[str, str]) -> str:
+    # 1. Se tiver NVIDIA_API_KEY
+    if "NVIDIA_API_KEY" in keys:
+        key = keys["NVIDIA_API_KEY"]
+        url = "https://integrate.api.nvidia.com/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json"
+        }
+        body = {
+            "model": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.2,
+            "max_tokens": 500
+        }
+        try:
+            async with httpx.AsyncClient() as client:
+                res = await client.post(url, json=body, headers=headers, timeout=25)
+                if res.status_code == 200:
+                    return str(res.json()["choices"][0]["message"]["content"]).strip()
+                else:
+                    print(f"Erro Nvidia API ({res.status_code}): {res.text}")
+        except Exception as e:
+            print(f"Erro ao chamar Nvidia: {e}")
+
+    # 2. Se tiver GEMINI_API_KEY ou GOOGLE_API_KEY
+    gemini_key = keys.get("GEMINI_API_KEY") or keys.get("GOOGLE_API_KEY")
+    if gemini_key:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
+        body = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.2}
+        }
+        try:
+            async with httpx.AsyncClient() as client:
+                res = await client.post(url, json=body, timeout=25)
+                if res.status_code == 200:
+                    return str(res.json()["candidates"][0]["content"]["parts"][0]["text"]).strip()
+                else:
+                    print(f"Erro Gemini API ({res.status_code}): {res.text}")
+        except Exception as e:
+            print(f"Erro ao chamar Gemini: {e}")
+
+    return ""
 
 
 def send_telegram_message(message: str) -> None:
@@ -59,13 +130,38 @@ def send_discord_message(message: str) -> None:
         print(f"Erro ao enviar mensagem para o Discord: {exc}")
 
 
-def build_notification_message(status: str, station_id: int, alerts: list[str], diagnosis: str) -> str:
-    header = f"[{status}] Estacao {station_id}"
+def build_notification_message(
+    status: str,
+    station_id: int,
+    alerts: list[str],
+    diagnosis: str,
+    latest_weather: dict[str, Any] | None,
+    ai_diagnosis: str | None = None,
+) -> str:
+    emoji = "🚨 [ALERT]" if alerts else "✅ [OK]"
+    header = f"{emoji} Estação {station_id}"
+
+    if latest_weather:
+        temp = latest_weather.get("temperatura")
+        umid = latest_weather.get("umidade")
+        chuva = latest_weather.get("quantidadeChuva")
+
+        temp_str = f"{temp:.1f}°C" if temp is not None else "N/A"
+        umid_str = f"{umid:.1f}%" if umid is not None else "N/A"
+        chuva_str = f"{chuva:.1f} mm" if chuva is not None else "N/A"
+
+        val_block = f"🌡️ Temp: {temp_str} | 💧 Umid: {umid_str} | 🌧️ Chuva: {chuva_str}"
+    else:
+        val_block = "Nenhum dado meteorológico recente disponível."
+
     if alerts:
         body = "Alertas:\n" + "\n".join(f"- {alert}" for alert in alerts)
     else:
         body = "Sem alertas ativos."
-    return f"{header}\n\n{body}\n\n{diagnosis}"
+
+    diag_section = ai_diagnosis if ai_diagnosis else diagnosis
+
+    return f"{header}\n{val_block}\n\n{body}\n\n{diag_section}"
 
 
 async def main() -> int:
@@ -106,7 +202,58 @@ async def main() -> int:
             print(f"- {alert}")
     print(diagnosis)
 
-    notification = build_notification_message(status, args.station_id, alerts, diagnosis)
+    ai_diagnosis = None
+    if alerts:
+        keys = load_hermes_keys()
+        if keys:
+            # Filtra os dados apenas para o essencial para economizar tokens
+            clima_simplificado = [
+                {
+                    "data": r.get("measured_at") or r.get("dataMedicao"),
+                    "t": r.get("temperatura"),
+                    "u": r.get("umidade"),
+                    "c": r.get("quantidadeChuva")
+                }
+                for r in weather[:6]
+            ]
+            iot_simplificado = [
+                {
+                    "data": r.get("measured_at") or r.get("time"),
+                    "bateria": r.get("battery"),
+                    "pluv": r.get("ConsumoPluviometro"),
+                    "temp": r.get("ConsumoTemperatura"),
+                    "umid": r.get("ConsumoUmidade")
+                }
+                for r in iot[:6]
+            ]
+            prompt = f"""Você é o Hermes, agente de diagnóstico inteligente das estações meteorológicas PluView.
+Houve um alerta na Estação {args.station_id}.
+
+Alertas identificados pelo sistema:
+{"\n".join(f"- {a}" for a in alerts)}
+
+Dados de Clima (últimas leituras):
+{json.dumps(clima_simplificado, indent=2)}
+
+Dados de Telemetria/IoT (consumo dos sensores e bateria):
+{json.dumps(iot_simplificado, indent=2)}
+
+Por favor:
+1. Analise se o problema parece ser um "Possível mau contato" (oscilações, falhas intermitentes) ou um "Possível defeito permanente no sensor/placa" (valores fixos absurdos, consumo zerado recorrente, falta de dados total).
+2. Escreva um diagnóstico direto em português contendo recomendações curtas de verificação física para o operador da estação.
+3. Seja breve, técnico e profissional (máximo 4-5 linhas).
+"""
+            print("Chamando IA do Hermes para gerar diagnóstico...")
+            ai_diagnosis = await call_llm_for_diagnosis(prompt, keys)
+            if ai_diagnosis:
+                print(f"Diagnóstico da IA:\n{ai_diagnosis}")
+
+    weather_sorted = sort_by_time(weather)
+    latest_weather = weather_sorted[-1] if weather_sorted else None
+
+    notification = build_notification_message(
+        status, args.station_id, alerts, diagnosis, latest_weather, ai_diagnosis
+    )
     send_telegram_message(notification)
     send_discord_message(notification)
 

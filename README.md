@@ -163,7 +163,7 @@ No Hermes, procure pela area de configuracao de MCP servers. Dependendo da insta
 - `mcp.json`
 - configuracao de ferramentas/MCP dentro das settings do Hermes
 
-Se o Hermes aceitar o formato `mcpServers`, use o exemplo abaixo.
+Se o Hermes aceitar o formato `mcpServers`, use o exemplo abaixo. ~
 
 ### 2. Configure Supabase MCP e Hermes MCP
 
