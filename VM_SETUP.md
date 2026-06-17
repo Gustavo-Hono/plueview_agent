@@ -26,7 +26,7 @@ O Hermes em si nao precisa ser instalado na raiz da VM. O que precisa ficar em u
 Existem dois modos:
 
 - Por demanda: o usuario pergunta no Hermes, e o Hermes chama o MCP local.
-- Automatico: o cron da VM roda `monitor_cron.py` periodicamente e grava diagnosticos em log.
+- Automatico: o cron da VM roda `monitor_cron.py` periodicamente, grava diagnosticos em log e envia mensagem no Telegram quando configurado.
 
 Como o ESP32 envia dados meteorologicos a cada 1 hora, a recomendacao e:
 
@@ -144,6 +144,42 @@ Use `SUPABASE_PROJECT_REF` para o ref puro do projeto. Se preferir informar a UR
 SUPABASE_MCP_URL=https://mcp.supabase.com/mcp?project_ref=wlwaysvyyvrvfdngnaej&read_only=true&features=database
 ```
 
+Opcionalmente, configure Telegram no mesmo `.env`. Com essas variaveis preenchidas, o cron envia uma mensagem a cada execucao:
+
+- `OK`: envia o diagnostico normal quando a estacao esta funcionando.
+- `ALERT`: envia os alertas quando houver falha, atraso de leitura ou evento suspeito.
+
+```bash
+cat >> /opt/plueview_agent/.env <<'EOF'
+TELEGRAM_BOT_TOKEN=COLE_O_TOKEN_DO_BOT_AQUI
+TELEGRAM_CHAT_ID=COLE_O_CHAT_ID_AQUI
+EOF
+
+chmod 600 /opt/plueview_agent/.env
+```
+
+Para criar o bot, fale com `@BotFather` no Telegram, use `/newbot` e copie o token gerado.
+
+Para descobrir o `TELEGRAM_CHAT_ID`:
+
+1. Envie qualquer mensagem para o bot pelo Telegram.
+2. Rode na VM:
+
+```bash
+set -a
+source /opt/plueview_agent/.env
+set +a
+curl "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates"
+```
+
+Procure no JSON por `"chat":{"id":...}` e copie esse numero para `TELEGRAM_CHAT_ID`.
+
+Se quiser usar Discord alem de Telegram, tambem e aceito:
+
+```bash
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+```
+
 ## 6. Testar sintaxe
 
 ```bash
@@ -245,6 +281,17 @@ Diagnostico curto - estacao 1 (ultimas 6h)
 
 Se houver atraso, falta de dados ou diagnostico suspeito, a saida tera `status=ALERT` e o processo sai com codigo `2`.
 
+Se `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID` estiverem configurados, esse comando tambem envia a mesma mensagem para o Telegram.
+
+Para forcar um alerta de teste no Telegram, use uma estacao que nao existe:
+
+```bash
+cd /opt/plueview_agent
+venv/bin/python monitor_cron.py --station-id 999999 --window-hours 6 --stale-hours 2.5
+```
+
+Depois volte para `--station-id 1`.
+
 ## 11. Configurar cron automatico
 
 Crie um diretorio de logs:
@@ -287,11 +334,20 @@ Ver se o cron foi instalado:
 crontab -l
 ```
 
-Importante: essa versao grava diagnosticos em log. Para enviar alerta por Telegram, email, Discord ou Slack, adicione um notifier depois; o cron ja separa `OK` de `ALERT`.
+Com Telegram configurado no `.env`, cada execucao do cron envia:
+
+- uma mensagem `OK` com o diagnostico normal quando tudo estiver funcionando;
+- uma mensagem `ALERT` com a lista de alertas quando algo estiver errado.
+
+O cron nao precisa abrir o aplicativo Hermes. Ele usa o mesmo core de diagnostico do MCP (`hermes_core.py`) para gerar a inferencia automaticamente na VM.
 
 ## 12. Configurar no cliente Hermes
 
 No Hermes, adicione estes MCP servers.
+
+Essa etapa liga o aplicativo Hermes ao MCP local para uso por demanda. Quando voce perguntar no Hermes, ele consegue chamar `hermes_mcp.py`, gerar o SQL, usar o Supabase MCP e devolver o diagnostico curto.
+
+O monitor automatico com Telegram fica separado: ele e executado pelo cron com `monitor_cron.py`.
 
 Modo recomendado, com Supabase MCP separado:
 
