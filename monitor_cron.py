@@ -27,7 +27,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--station-id", type=int, default=1)
     parser.add_argument("--window-hours", type=int, default=6)
     parser.add_argument("--limit", type=int, default=100)
-    parser.add_argument("--stale-hours", type=float, default=2.5)
+    parser.add_argument("--stale-hours", type=float, default=2.0)
     parser.add_argument("--require-iot", action="store_true")
     return parser.parse_args()
 
@@ -205,15 +205,17 @@ async def main() -> int:
 
     alerts: list[str] = []
     if not weather:
-        alerts.append("sem leituras meteorologicas na janela monitorada")
+        alerts.append("sem leituras meteorologicas na janela monitorada (Estação possivelmente desligada ou sem bateria)")
     elif weather_age is not None and weather_age > args.stale_hours:
-        alerts.append(f"ultima leitura meteorologica ha {weather_age:.1f}h")
+        status_suffix = " (Possivelmente desligada ou sem bateria)" if weather_age >= 2.0 else ""
+        alerts.append(f"ultima leitura meteorologica ha {weather_age:.1f}h{status_suffix}")
 
     if args.require_iot:
         if not iot:
-            alerts.append("sem leituras IoT/bateria na janela monitorada")
+            alerts.append("sem leituras IoT/bateria na janela monitorada (Estação possivelmente desligada ou sem bateria)")
         elif iot_age is not None and iot_age > args.stale_hours:
-            alerts.append(f"ultima leitura IoT/bateria ha {iot_age:.1f}h")
+            status_suffix = " (Possivelmente desligada ou sem bateria)" if iot_age >= 2.0 else ""
+            alerts.append(f"ultima leitura IoT/bateria ha {iot_age:.1f}h{status_suffix}")
 
     if "Conclusao: requer verificacao operacional" in diagnosis:
         alerts.append("diagnostico requer verificacao operacional")
