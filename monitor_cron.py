@@ -69,7 +69,7 @@ async def call_llm_for_diagnosis(prompt: str, keys: dict[str, str]) -> str:
             "model": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.2,
-            "max_tokens": 500
+            "max_tokens": 1000
         }
         print("Enviando requisição para Nvidia API...")
         try:
