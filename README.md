@@ -10,11 +10,40 @@ ESP32/MQTT -> PluView API -> Supabase/Postgres -> Supabase MCP -> Hermes MCP -> 
 
 Use este README para entender a arquitetura e implementar o MCP no cliente Hermes.
 
+## Estado atual
+
+Hoje o agent funciona como um agente de confiabilidade v1 para a estacao.
+
+Ele ja faz:
+
+- consulta dados do Supabase pelo MCP oficial em modo read-only;
+- filtra leituras por `stationId`;
+- gera diagnostico curto para uma estacao;
+- detecta ausencia ou atraso de leitura meteorologica;
+- detecta lacunas grandes entre leituras;
+- detecta campos meteorologicos ausentes;
+- detecta valores fisicamente invalidos de temperatura, umidade e chuva;
+- detecta eventos climaticos simples, como temperatura extrema, umidade extrema, pico de chuva, chuva acumulada alta, vento forte e saltos bruscos;
+- avalia bateria somente se existir telemetria em `DataPlueView.battery`;
+- marca bateria como `nao avaliada` quando nao houver telemetria;
+- envia mensagem no Telegram em toda execucao do cron, quando `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID` estiverem configurados.
+
+Ele ainda nao faz:
+
+- buscar nome/local da estacao, como `Fazenda Santa Maria`;
+- comparar com estacoes vizinhas;
+- detectar chuva isolada contra uma estacao proxima;
+- detectar sensor travado por valor repetido durante muitas horas;
+- avaliar painel solar ou autonomia;
+- gerar relatorio diario consolidado.
+
+O modo automatico nao abre o aplicativo Hermes. Ele usa `monitor_cron.py`, que chama o mesmo core de diagnostico usado pelo MCP e manda a mensagem no Telegram.
+
 ## O que foi criado
 
 - `hermes_core.py`: regras de negocio, SQL, cliente Supabase MCP e diagnostico.
 - `hermes_mcp.py`: adaptador MCP local; deve ficar fino e delegar a regra para o core.
-- `monitor_cron.py`: entrada para monitoramento automatico via cron.
+- `monitor_cron.py`: entrada para monitoramento automatico via cron e envio de mensagem para Telegram/Discord.
 - `mcp.example.json`: exemplo de configuracao para adicionar no Hermes.
 - `test_hermes_client.py`: teste local sem acessar Supabase.
 
@@ -113,6 +142,16 @@ features=database
 ```
 
 Prefira guardar apenas o ref puro em `SUPABASE_PROJECT_REF`. Se voce ja colocou a URL completa em `SUPABASE_PROJECT_REF`, o core ainda aceita, mas para manutencao o nome mais claro e `SUPABASE_MCP_URL`.
+
+Para o cron automatico funcionar sozinho na VM, configure tambem:
+
+```bash
+SUPABASE_ACCESS_TOKEN="seu-token"
+TELEGRAM_BOT_TOKEN="token-do-bot"
+TELEGRAM_CHAT_ID="chat-id"
+```
+
+O Telegram e opcional. Sem essas variaveis, o cron ainda imprime o diagnostico no log, mas nao envia mensagem.
 
 ## Implementacao no Hermes
 
@@ -232,6 +271,64 @@ Fluxo que o Hermes deve executar:
 3. Enviar o resultado do Supabase para `hermes.diagnosticar_resultado_supabase`.
 
 4. Responder ao usuario com o diagnostico curto.
+
+Esse uso e por demanda: voce pergunta no Hermes, o Hermes chama as ferramentas MCP e responde no chat.
+
+## Como usar no cron com Telegram
+
+O monitor automatico e executado por `monitor_cron.py`. Ele consulta o Supabase, gera o diagnostico e envia a mesma mensagem para Telegram quando `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID` estao no `.env`.
+
+Exemplo de `.env` na VM:
+
+```bash
+SUPABASE_PROJECT_REF=wlwaysvyyvrvfdngnaej
+SUPABASE_ACCESS_TOKEN=COLE_SEU_ACCESS_TOKEN_AQUI
+TELEGRAM_BOT_TOKEN=COLE_O_TOKEN_DO_BOT_AQUI
+TELEGRAM_CHAT_ID=COLE_O_CHAT_ID_AQUI
+```
+
+Teste manual:
+
+```bash
+cd /opt/plueview_agent
+venv/bin/python monitor_cron.py --station-id 1 --window-hours 6 --stale-hours 2.5
+```
+
+Com tudo normal, a mensagem enviada para o Telegram segue este formato:
+
+```text
+[OK] Estacao 1
+
+Sem alertas ativos.
+
+Diagnostico curto - estacao 1 (ultimas 6h)
+Base: ...
+Sensor: ...
+Bateria: nao avaliada (sem telemetria de bateria)
+Clima: ...
+Conclusao: operacao normal.
+```
+
+Quando houver problema, a mensagem vira `ALERT`:
+
+```text
+[ALERT] Estacao 1
+
+Alertas:
+- ultima leitura meteorologica ha 3.1h
+
+Diagnostico curto - estacao 1 (ultimas 6h)
+...
+Conclusao: requer verificacao operacional.
+```
+
+Cron recomendado para ESP32 enviando a cada 1 hora:
+
+```cron
+0 * * * * cd /opt/plueview_agent && /opt/plueview_agent/venv/bin/python /opt/plueview_agent/monitor_cron.py --station-id 1 --window-hours 6 --stale-hours 2.5 >> /opt/plueview_agent/logs/monitor.log 2>&1
+```
+
+Esse cron roda a cada 1 hora e alerta quando a ultima leitura meteorologica passar de `2.5h`.
 
 ## Uso one-shot
 
