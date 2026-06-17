@@ -226,11 +226,12 @@ async def main() -> int:
                 }
                 for r in iot[:6]
             ]
+            alerts_str = "\n".join(f"- {a}" for a in alerts)
             prompt = f"""Você é o Hermes, agente de diagnóstico inteligente das estações meteorológicas PluView.
 Houve um alerta na Estação {args.station_id}.
 
 Alertas identificados pelo sistema:
-{"\n".join(f"- {a}" for a in alerts)}
+{alerts_str}
 
 Dados de Clima (últimas leituras):
 {json.dumps(clima_simplificado, indent=2)}
