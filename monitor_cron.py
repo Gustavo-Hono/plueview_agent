@@ -245,8 +245,9 @@ Por favor:
 3. Seja breve, técnico e profissional (máximo 4-5 linhas).
 """
             print("Chamando IA do Hermes para gerar diagnóstico...")
-            ai_diagnosis = await call_llm_for_diagnosis(prompt, keys)
-            if ai_diagnosis:
+            ai_res = await call_llm_for_diagnosis(prompt, keys)
+            if ai_res and ai_res.strip().lower() not in ("none", "null", ""):
+                ai_diagnosis = ai_res
                 print(f"Diagnóstico da IA:\n{ai_diagnosis}")
 
     weather_sorted = sort_by_time(weather)
