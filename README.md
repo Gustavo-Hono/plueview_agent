@@ -1,34 +1,40 @@
-# PluView Agent
+# PluView Telemetry Diagnostics
 
-Python MCP reliability agent for diagnosing IoT weather stations using Supabase data.
+Python diagnostic tool for checking whether PluView rain-gauge/weather-station telemetry is arriving as expected.
 
-The agent was built around a practical monitoring problem: weather stations can stop reporting, send delayed readings, produce invalid sensor values, or show operational anomalies that need to be summarized quickly. PluView Agent turns raw station telemetry into short diagnostic reports that can be used by operators or connected AI tools.
+This repository is not positioned as a general AI agent. Its core value is a set of rule-based heuristics for operational monitoring: detecting missing signals, delayed readings, gaps in telemetry, invalid sensor values, and simple anomalies that suggest the pluviometer or weather station may not be reporting correctly.
 
 ## What it demonstrates
 
-- Python agent design around the Model Context Protocol (MCP)
-- Read-only Supabase/Postgres diagnostic workflow
-- Operational rules for IoT telemetry quality
-- Sensor-health checks for missing, delayed, invalid, or suspicious readings
-- Cron-based automation with optional Telegram notifications
-- Clear separation between business rules and MCP adapter code
+- Python-based telemetry diagnostics
+- Rule-based health checks for IoT/weather-station data
+- Read-only Supabase/Postgres inspection workflow
+- Operational heuristics for missing, delayed, invalid, or suspicious readings
+- Scheduled monitoring entry point with optional notification support
+- Separation between diagnostic rules and integration/adaptor code
 
-## Architecture
+## Diagnostic flow
 
 ```text
 ESP32 / MQTT
     -> PluView API
     -> Supabase / Postgres
-    -> Supabase MCP
-    -> PluView Agent MCP
-    -> short station diagnostic
+    -> diagnostic scripts
+    -> short telemetry health report
 ```
 
-The Supabase MCP is responsible for database access. PluView Agent is responsible for domain rules: which tables to inspect, which SQL should be generated, how to detect anomalies, and how to format the diagnostic result.
+The diagnostic logic focuses on answering practical questions such as:
+
+- Is the pluviometer still sending data?
+- When was the last valid reading?
+- Are there large gaps between readings?
+- Are expected telemetry fields missing?
+- Are temperature, humidity, rainfall, or wind values physically suspicious?
+- Is the station showing signs of an operational issue?
 
 ## Current capabilities
 
-- Query station readings by `stationId`
+- Filter station readings by `stationId`
 - Generate short diagnostics for a station and time window
 - Detect missing or delayed weather readings
 - Detect large telemetry gaps
@@ -37,12 +43,12 @@ The Supabase MCP is responsible for database access. PluView Agent is responsibl
 - Detect simple weather events such as extreme temperature, heavy rainfall, strong wind, and abrupt jumps
 - Evaluate battery status only when battery telemetry exists
 - Mark battery as not evaluated when telemetry is unavailable
-- Send scheduled diagnostic messages through Telegram when configured
+- Send scheduled diagnostic messages when notification credentials are configured
 
 ## Not implemented yet
 
 - Compare a station with nearby stations
-- Detect isolated rain against neighboring stations
+- Detect isolated rain by comparing neighboring stations
 - Detect stuck sensors through repeated values over long periods
 - Evaluate solar-panel or autonomy behavior
 - Generate daily consolidated reports
@@ -50,20 +56,14 @@ The Supabase MCP is responsible for database access. PluView Agent is responsibl
 ## Repository structure
 
 ```text
-hermes_core.py          business rules, SQL generation, Supabase MCP client, diagnostics
-hermes_mcp.py           local MCP adapter
+hermes_core.py          diagnostic rules, SQL generation, telemetry evaluation
+hermes_mcp.py           optional MCP adapter around the diagnostic logic
 monitor_cron.py         scheduled monitoring entry point
-mcp.example.json        example MCP client configuration
 test_hermes_client.py   local test without Supabase access
+mcp.example.json        example MCP configuration, if used
 VM_SETUP.md             deployment/setup notes
 ```
 
-## MCP tools
-
-- `sql_diagnostico_estacao`: generates a read-only SQL query for a station and time window
-- `diagnosticar_resultado_supabase`: receives Supabase JSON output and returns a diagnostic
-- `analisar_estacao_supabase`: attempts to call Supabase MCP directly and return the diagnostic in one step
-
 ## Status
 
-Portfolio-ready reliability agent v1. The project is intentionally focused on operational diagnostics instead of generic chatbot behavior, which makes it a stronger signal for applied AI, IoT monitoring, and backend automation roles.
+Portfolio-ready diagnostic utility v1. The project is strongest as a signal for backend automation, IoT telemetry checks, and practical reliability tooling, not as a chatbot or autonomous agent.
