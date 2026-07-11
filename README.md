@@ -1,529 +1,69 @@
-# Hermes MCP para diagnostico PluView + Supabase
+# PluView Agent
 
-Este diretorio contem um servidor MCP local chamado Hermes para diagnosticar estacoes PluView usando dados ja salvos no Supabase.
+Python MCP reliability agent for diagnosing IoT weather stations using Supabase data.
 
-O Hermes nao coleta MQTT e nao substitui a API PluView. O fluxo esperado e:
+The agent was built around a practical monitoring problem: weather stations can stop reporting, send delayed readings, produce invalid sensor values, or show operational anomalies that need to be summarized quickly. PluView Agent turns raw station telemetry into short diagnostic reports that can be used by operators or connected AI tools.
 
-```text
-ESP32/MQTT -> PluView API -> Supabase/Postgres -> Supabase MCP -> Hermes MCP -> diagnostico curto
-```
+## What it demonstrates
 
-Use este README para entender a arquitetura e implementar o MCP no cliente Hermes.
+- Python agent design around the Model Context Protocol (MCP)
+- Read-only Supabase/Postgres diagnostic workflow
+- Operational rules for IoT telemetry quality
+- Sensor-health checks for missing, delayed, invalid, or suspicious readings
+- Cron-based automation with optional Telegram notifications
+- Clear separation between business rules and MCP adapter code
 
-## Estado atual
-
-Hoje o agent funciona como um agente de confiabilidade v1 para a estacao.
-
-Ele ja faz:
-
-- consulta dados do Supabase pelo MCP oficial em modo read-only;
-- filtra leituras por `stationId`;
-- gera diagnostico curto para uma estacao;
-- detecta ausencia ou atraso de leitura meteorologica;
-- detecta lacunas grandes entre leituras;
-- detecta campos meteorologicos ausentes;
-- detecta valores fisicamente invalidos de temperatura, umidade e chuva;
-- detecta eventos climaticos simples, como temperatura extrema, umidade extrema, pico de chuva, chuva acumulada alta, vento forte e saltos bruscos;
-- avalia bateria somente se existir telemetria em `DataPlueView.battery`;
-- marca bateria como `nao avaliada` quando nao houver telemetria;
-- envia mensagem no Telegram em toda execucao do cron, quando `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID` estiverem configurados.
-
-Ele ainda nao faz:
-
-- buscar nome/local da estacao, como `Fazenda Santa Maria`;
-- comparar com estacoes vizinhas;
-- detectar chuva isolada contra uma estacao proxima;
-- detectar sensor travado por valor repetido durante muitas horas;
-- avaliar painel solar ou autonomia;
-- gerar relatorio diario consolidado.
-
-O modo automatico nao abre o aplicativo Hermes. Ele usa `monitor_cron.py`, que chama o mesmo core de diagnostico usado pelo MCP e manda a mensagem no Telegram.
-
-## O que foi criado
-
-- `hermes_core.py`: regras de negocio, SQL, cliente Supabase MCP e diagnostico.
-- `hermes_mcp.py`: adaptador MCP local; deve ficar fino e delegar a regra para o core.
-- `monitor_cron.py`: entrada para monitoramento automatico via cron e envio de mensagem para Telegram/Discord.
-- `mcp.example.json`: exemplo de configuracao para adicionar no Hermes.
-- `test_hermes_client.py`: teste local sem acessar Supabase.
-
-O servidor expoe tres ferramentas:
-
-- `sql_diagnostico_estacao`: gera uma consulta SQL read-only para a estacao e janela informadas.
-- `diagnosticar_resultado_supabase`: recebe o JSON retornado pelo Supabase MCP e gera o diagnostico.
-- `analisar_estacao_supabase`: tenta chamar o Supabase MCP diretamente e devolver o diagnostico em uma unica ferramenta.
-
-Tambem expoe o prompt:
-
-- `analisar_estacao_prompt`: instrucao pronta para o Hermes seguir o fluxo com Supabase MCP.
-
-## Por que usar dois MCPs
-
-O Supabase MCP deve ficar responsavel por acessar o banco. Ele ja oferece `execute_sql`, autenticacao com Supabase e modo read-only.
-
-O Hermes MCP deve ficar responsavel pela regra de negocio:
-
-- quais tabelas ler;
-- qual SQL usar;
-- como detectar falha de sensor;
-- como detectar queda de bateria quando houver telemetria disponivel;
-- como detectar evento climatico estranho;
-- como formatar um diagnostico curto.
-
-Assim o Hermes nao precisa guardar credencial direta do Postgres nem instalar driver de banco local.
-
-## Tabelas usadas
-
-O diagnostico usa `stationId` como filtro principal.
-
-Tabela obrigatoria:
-
-- `public.weather_data`
-
-Tabela opcional, usada apenas se houver telemetria IoT/bateria:
-
-- `public."DataPlueView"`
-
-Campos meteorologicos:
-
-- `weather_data."stationId"`
-- `weather_data."dataMedicao"`
-- `weather_data.temperatura`
-- `weather_data.umidade`
-- `weather_data."quantidadeChuva"`
-- `weather_data."velocidadeVento"`
-- `weather_data."direcaoVento"`
-- `weather_data.latitude`
-- `weather_data.longitude`
-
-Campos IoT/brutos opcionais:
-
-- `"DataPlueView"."stationId"`
-- `"DataPlueView".time`
-- `"DataPlueView".battery`
-- `"DataPlueView"."ConsumoPluviometro"`
-- `"DataPlueView"."ConsumoVelocidadeVento"`
-- `"DataPlueView"."ConsumoDirecaoVento"`
-- `"DataPlueView"."ConsumoTemperatura"`
-- `"DataPlueView"."ConsumoUmidade"`
-
-## Requisitos
-
-Ja existe um ambiente Python em:
-
-```bash
-agent/venv
-```
-
-Entao, para rodar o Hermes MCP local, nao precisa instalar nada agora.
-
-Para acessar Supabase pelo MCP oficial, voce precisa de:
-
-- `SUPABASE_PROJECT_REF`: id/ref do projeto Supabase, por exemplo `wlwaysvyyvrvfdngnaej`.
-- `SUPABASE_MCP_URL`: opcional, use se quiser informar a URL completa do MCP Supabase.
-
-`SUPABASE_ACCESS_TOKEN` nao e obrigatorio no fluxo normal. O Supabase MCP remoto usa login/OAuth pelo cliente MCP quando o cliente suporta esse fluxo. Use token manual apenas quando:
-
-- o cliente MCP nao suporta login/OAuth;
-- voce estiver em CI ou ambiente sem navegador;
-- voce quiser passar autenticacao por header manualmente.
-
-O Supabase MCP remoto oficial e:
+## Architecture
 
 ```text
-https://mcp.supabase.com/mcp
+ESP32 / MQTT
+    -> PluView API
+    -> Supabase / Postgres
+    -> Supabase MCP
+    -> PluView Agent MCP
+    -> short station diagnostic
 ```
 
-Use sempre:
+The Supabase MCP is responsible for database access. PluView Agent is responsible for domain rules: which tables to inspect, which SQL should be generated, how to detect anomalies, and how to format the diagnostic result.
+
+## Current capabilities
+
+- Query station readings by `stationId`
+- Generate short diagnostics for a station and time window
+- Detect missing or delayed weather readings
+- Detect large telemetry gaps
+- Detect missing weather fields
+- Detect physically invalid values for temperature, humidity, and rainfall
+- Detect simple weather events such as extreme temperature, heavy rainfall, strong wind, and abrupt jumps
+- Evaluate battery status only when battery telemetry exists
+- Mark battery as not evaluated when telemetry is unavailable
+- Send scheduled diagnostic messages through Telegram when configured
+
+## Not implemented yet
+
+- Compare a station with nearby stations
+- Detect isolated rain against neighboring stations
+- Detect stuck sensors through repeated values over long periods
+- Evaluate solar-panel or autonomy behavior
+- Generate daily consolidated reports
+
+## Repository structure
 
 ```text
-read_only=true
-features=database
+hermes_core.py          business rules, SQL generation, Supabase MCP client, diagnostics
+hermes_mcp.py           local MCP adapter
+monitor_cron.py         scheduled monitoring entry point
+mcp.example.json        example MCP client configuration
+test_hermes_client.py   local test without Supabase access
+VM_SETUP.md             deployment/setup notes
 ```
 
-Prefira guardar apenas o ref puro em `SUPABASE_PROJECT_REF`. Se voce ja colocou a URL completa em `SUPABASE_PROJECT_REF`, o core ainda aceita, mas para manutencao o nome mais claro e `SUPABASE_MCP_URL`.
+## MCP tools
 
-Para o cron automatico funcionar sozinho na VM, configure tambem:
+- `sql_diagnostico_estacao`: generates a read-only SQL query for a station and time window
+- `diagnosticar_resultado_supabase`: receives Supabase JSON output and returns a diagnostic
+- `analisar_estacao_supabase`: attempts to call Supabase MCP directly and return the diagnostic in one step
 
-```bash
-SUPABASE_ACCESS_TOKEN="seu-token"
-TELEGRAM_BOT_TOKEN="token-do-bot"
-TELEGRAM_CHAT_ID="chat-id"
-```
+## Status
 
-O Telegram e opcional. Sem essas variaveis, o cron ainda imprime o diagnostico no log, mas nao envia mensagem.
-
-## Implementacao no Hermes
-
-### 1. Abra a configuracao MCP do Hermes
-
-No Hermes, procure pela area de configuracao de MCP servers. Dependendo da instalacao, isso pode ser um arquivo como:
-
-- `.mcp.json`
-- `mcp.json`
-- configuracao de ferramentas/MCP dentro das settings do Hermes
-
-Se o Hermes aceitar o formato `mcpServers`, use o exemplo abaixo. ~
-
-### 2. Configure Supabase MCP e Hermes MCP
-
-Exemplo com caminhos relativos ao diretorio raiz deste workspace:
-
-```json
-{
-  "mcpServers": {
-    "supabase": {
-      "type": "http",
-      "url": "https://mcp.supabase.com/mcp?project_ref=${SUPABASE_PROJECT_REF}&read_only=true&features=database"
-    },
-    "hermes": {
-      "command": "agent/venv/bin/python",
-      "args": ["agent/hermes_mcp.py"]
-    }
-  }
-}
-```
-
-O mesmo exemplo esta em:
-
-```text
-agent/mcp.example.json
-```
-
-Se o Hermes roda a partir de outro diretorio, prefira caminho absoluto:
-
-```json
-{
-  "mcpServers": {
-    "supabase": {
-      "type": "http",
-      "url": "https://mcp.supabase.com/mcp?project_ref=${SUPABASE_PROJECT_REF}&read_only=true&features=database"
-    },
-    "hermes": {
-      "command": "/home/pinguimsurfante/Área de trabalho/plueview/agent/venv/bin/python",
-      "args": ["/home/pinguimsurfante/Área de trabalho/plueview/agent/hermes_mcp.py"]
-    }
-  }
-}
-```
-
-Se o Hermes nao aceitar variaveis `${...}` dentro do JSON, substitua pelos valores reais:
-
-```text
-${SUPABASE_PROJECT_REF} -> ref do projeto Supabase
-```
-
-Se o Hermes nao suportar OAuth/login do Supabase MCP e exigir autenticacao manual, use a variante com header:
-
-```json
-{
-  "mcpServers": {
-    "supabase": {
-      "type": "http",
-      "url": "https://mcp.supabase.com/mcp?project_ref=${SUPABASE_PROJECT_REF}&read_only=true&features=database",
-      "headers": {
-        "Authorization": "Bearer ${SUPABASE_ACCESS_TOKEN}"
-      }
-    }
-  }
-}
-```
-
-### 3. Reinicie ou recarregue as ferramentas MCP
-
-Depois de salvar a configuracao, reinicie o Hermes ou use a opcao de recarregar MCP servers.
-
-O Hermes deve mostrar dois servidores:
-
-- `supabase`
-- `hermes`
-
-E o servidor `hermes` deve mostrar estas ferramentas:
-
-- `sql_diagnostico_estacao`
-- `diagnosticar_resultado_supabase`
-- `analisar_estacao_supabase`
-
-## Como usar no Hermes
-
-Prompt recomendado:
-
-```text
-Analise a estacao 1 nas ultimas 24 horas.
-Use o Supabase MCP em modo read-only para ler weather_data pelo stationId.
-Veja se houve falha de sensor ou evento climatico estranho. Se houver telemetria de bateria, avalie tambem queda de bateria.
-Gere um diagnostico curto.
-```
-
-Fluxo que o Hermes deve executar:
-
-1. Chamar `hermes.sql_diagnostico_estacao` com:
-
-```json
-{
-  "station_id": 1,
-  "horas": 24
-}
-```
-
-2. Executar o SQL retornado usando `supabase.execute_sql`.
-
-3. Enviar o resultado do Supabase para `hermes.diagnosticar_resultado_supabase`.
-
-4. Responder ao usuario com o diagnostico curto.
-
-Esse uso e por demanda: voce pergunta no Hermes, o Hermes chama as ferramentas MCP e responde no chat.
-
-## Como usar no cron com Telegram
-
-O monitor automatico e executado por `monitor_cron.py`. Ele consulta o Supabase, gera o diagnostico e envia a mesma mensagem para Telegram quando `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID` estao no `.env`.
-
-Exemplo de `.env` na VM:
-
-```bash
-SUPABASE_PROJECT_REF=wlwaysvyyvrvfdngnaej
-SUPABASE_ACCESS_TOKEN=COLE_SEU_ACCESS_TOKEN_AQUI
-TELEGRAM_BOT_TOKEN=COLE_O_TOKEN_DO_BOT_AQUI
-TELEGRAM_CHAT_ID=COLE_O_CHAT_ID_AQUI
-```
-
-Teste manual:
-
-```bash
-cd /opt/plueview_agent
-venv/bin/python monitor_cron.py --station-id 1 --window-hours 6 --stale-hours 2.5
-```
-
-Com tudo normal, a mensagem enviada para o Telegram segue este formato:
-
-```text
-[OK] Estacao 1
-
-Sem alertas ativos.
-
-Diagnostico curto - estacao 1 (ultimas 6h)
-Base: ...
-Sensor: ...
-Bateria: nao avaliada (sem telemetria de bateria)
-Clima: ...
-Conclusao: operacao normal.
-```
-
-Quando houver problema, a mensagem vira `ALERT`:
-
-```text
-[ALERT] Estacao 1
-
-Alertas:
-- ultima leitura meteorologica ha 3.1h
-
-Diagnostico curto - estacao 1 (ultimas 6h)
-...
-Conclusao: requer verificacao operacional.
-```
-
-Cron recomendado para ESP32 enviando a cada 1 hora:
-
-```cron
-0 * * * * cd /opt/plueview_agent && /opt/plueview_agent/venv/bin/python /opt/plueview_agent/monitor_cron.py --station-id 1 --window-hours 6 --stale-hours 2.5 >> /opt/plueview_agent/logs/monitor.log 2>&1
-```
-
-Esse cron roda a cada 1 hora e alerta quando a ultima leitura meteorologica passar de `2.5h`.
-
-## Uso one-shot
-
-Se o Hermes conseguir chamar servidores MCP HTTP com header de autenticacao a partir de uma ferramenta local, voce pode usar:
-
-```text
-hermes.analisar_estacao_supabase(station_id=1, horas=24)
-```
-
-Para isso, deixe estas variaveis disponiveis no ambiente que inicia o Hermes MCP:
-
-```bash
-export SUPABASE_PROJECT_REF="seu-project-ref"
-export SUPABASE_MCP_URL="https://mcp.supabase.com/mcp?project_ref=${SUPABASE_PROJECT_REF}&read_only=true&features=database"
-```
-
-Se estiver usando autenticacao manual por PAT, adicione tambem:
-
-```bash
-export SUPABASE_ACCESS_TOKEN="seu-token"
-```
-
-O modo recomendado ainda e o fluxo com duas ferramentas, porque deixa o acesso ao banco explicitamente no Supabase MCP.
-
-## Como testar localmente
-
-Teste de sintaxe:
-
-```bash
-agent/venv/bin/python -m py_compile agent/hermes_core.py agent/hermes_mcp.py agent/monitor_cron.py agent/test_hermes_client.py
-```
-
-Teste local sem Supabase:
-
-```bash
-cd agent
-venv/bin/python test_hermes_client.py
-```
-
-Teste MCP via stdio:
-
-```bash
-agent/venv/bin/python - <<'PY'
-import asyncio
-from fastmcp import Client
-from fastmcp.client.transports import StdioTransport
-
-async def main():
-    transport = StdioTransport(
-        "agent/venv/bin/python",
-        ["agent/hermes_mcp.py"],
-        keep_alive=False,
-    )
-    async with Client(transport, timeout=10, init_timeout=10) as client:
-        tools = await client.list_tools()
-        print([tool.name for tool in tools])
-        result = await client.call_tool(
-            "sql_diagnostico_estacao",
-            {"station_id": 1, "horas": 24},
-        )
-        print(result.content[0].text.splitlines()[0])
-
-asyncio.run(main())
-PY
-```
-
-Saida esperada:
-
-```text
-['sql_diagnostico_estacao', 'diagnosticar_resultado_supabase', 'analisar_estacao_supabase']
-WITH weather AS (
-```
-
-## SQL gerado
-
-O SQL e somente leitura. Ele:
-
-- filtra `weather_data."stationId"`;
-- filtra `weather_data."dataMedicao"` pela janela em horas;
-- tenta incluir dados opcionais de `"DataPlueView"` pelo mesmo `stationId`;
-- devolve um unico campo `hermes_payload` em JSON.
-
-Exemplo resumido:
-
-```sql
-SELECT jsonb_build_object(
-  'stationId', 1,
-  'hours', 24,
-  'generatedAt', now(),
-  'weather', ...,
-  'iot', ...
-) AS hermes_payload;
-```
-
-## Regras do diagnostico
-
-O Hermes gera um diagnostico curto com estes blocos:
-
-- `Base`: quantidade de leituras meteorologicas e IoT.
-- `Sensor`: lacunas, campos ausentes, valores fisicamente invalidos e consumo de sensor zerado/negativo.
-- `Bateria`: `nao avaliada` quando nao houver telemetria; se houver bateria, avalia baixa, critica, queda acumulada e queda brusca entre leituras.
-- `Clima`: temperatura extrema, umidade extrema, pico de chuva, chuva acumulada alta, vento forte e saltos bruscos.
-- `Conclusao`: `operacao normal`, `monitorar` ou `requer verificacao operacional`.
-
-Limiares atuais:
-
-- lacuna meteorologica: `>= 3h`;
-- bateria baixa, se houver telemetria: `< 35%`;
-- bateria critica, se houver telemetria: `< 20%`;
-- queda acumulada de bateria, se houver telemetria: `>= 15 pontos percentuais`;
-- queda brusca de bateria, se houver telemetria: `>= 10 pontos entre leituras`;
-- temperatura fisicamente suspeita: `< -20 C` ou `> 60 C`;
-- temperatura extrema de evento climatico: `<= -5 C` ou `>= 45 C`;
-- umidade valida: `0%` a `100%`;
-- umidade extrema: `< 10%` ou `> 98%`;
-- pico de chuva: `>= 20 mm` em uma leitura;
-- chuva acumulada alta: `>= 50 mm`;
-- vento forte: `>= 20 m/s`;
-- salto termico: `>= 8 C` com taxa `>= 4 C/h`;
-- variacao brusca de umidade: `>= 35 pontos` em ate `2h`.
-
-## Exemplo de resposta
-
-```text
-Diagnostico curto - estacao 1 (ultimas 24h)
-Base: 3 leituras meteo, 3 leituras IoT
-Sensor: lacuna de 5.5h entre leituras meteorologicas; consumo zerado/negativo recorrente no sensor de temperatura
-Bateria: queda acumulada de 21 pontos percentuais; queda brusca de 19 pontos entre leituras
-Clima: pico de chuva de 26.4 mm em uma leitura; vento forte detectado (22.0 m/s)
-Conclusao: requer verificacao operacional.
-```
-
-## Seguranca
-
-Use o Supabase MCP sempre com:
-
-```text
-read_only=true
-features=database
-project_ref=<seu-project-ref>
-```
-
-Evite conectar o Hermes com permissao ampla em producao. Se precisar usar dados reais, prefira:
-
-- projeto escopado por `project_ref`;
-- login/OAuth pelo Supabase MCP, quando suportado pelo cliente;
-- token com menor permissao possivel, apenas quando autenticacao manual for necessaria;
-- aprovacao manual das chamadas MCP no Hermes;
-- revisao do SQL antes de executar.
-
-## Troubleshooting
-
-### Hermes nao mostra o servidor `hermes`
-
-Verifique se o caminho do Python e do script esta correto:
-
-```bash
-agent/venv/bin/python agent/hermes_mcp.py
-```
-
-Esse comando fica aguardando mensagens MCP via stdio; isso e esperado.
-
-### Hermes nao mostra o Supabase MCP
-
-Verifique:
-
-- se a URL contem `read_only=true`;
-- se `SUPABASE_PROJECT_REF` foi preenchido;
-- se o cliente Hermes iniciou o fluxo de login/OAuth do Supabase MCP;
-- se, no modo manual com header, o cliente Hermes aceita headers e `SUPABASE_ACCESS_TOKEN` esta valido.
-
-### `execute_sql` nao aparece
-
-Garanta que a URL do Supabase MCP tem:
-
-```text
-features=database
-```
-
-### Diagnostico vem sem dados
-
-Confirme no Supabase se existem registros recentes para a estacao:
-
-```sql
-SELECT count(*)
-FROM public.weather_data
-WHERE "stationId" = 1
-  AND "dataMedicao" >= now() - interval '24 hours';
-
-SELECT count(*)
-FROM public."DataPlueView"
-WHERE "stationId" = 1
-  AND time >= now() - interval '24 hours';
-```
-
-### Caminho com espaco no nome
-
-Como o workspace esta em `Área de trabalho`, alguns clientes podem falhar com caminhos relativos. Nesse caso use o exemplo com caminho absoluto.
+Portfolio-ready reliability agent v1. The project is intentionally focused on operational diagnostics instead of generic chatbot behavior, which makes it a stronger signal for applied AI, IoT monitoring, and backend automation roles.
